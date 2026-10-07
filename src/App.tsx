@@ -1,1059 +1,493 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
+  ArrowUpRight,
+  Check,
+  Mail,
+  Moon,
+  Music2,
+  Pause,
+  Play,
+  Send,
+  Sun,
   Volume2,
   VolumeX,
-  Sun,
-  Moon,
-  Send,
-  Mail,
-  ArrowLeft,
-  ArrowRight,
-  ExternalLink,
-  MessageSquare,
-  Sparkles,
-  Terminal,
-  Activity,
-  Check,
-  Home,
-  FileText,
-  MousePointer,
-  Cpu,
-  Layers,
-  Code
 } from 'lucide-react';
+import { siteConfig, type ThemeMode } from './config';
 
-class SynthEngine {
-  private ctx: AudioContext | null = null;
-  private oscillators: OscillatorNode[] = [];
-  private lfos: OscillatorNode[] = [];
-  private filter: BiquadFilterNode | null = null;
-  private mainGain: GainNode | null = null;
+type Toast = { id: string; message: string };
+type ChatMessage = { id: string; role: 'user' | 'model'; text: string };
 
-  private getOrInitCtx(): AudioContext | null {
-    if (!this.ctx) {
-      try {
-        this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      } catch (err) {
-        console.warn("Failed to create AudioContext:", err);
-        return null;
-      }
-    }
-    if (this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(() => {});
-    }
-    return this.ctx;
-  }
-
-  start() {
-    const ctx = this.getOrInitCtx();
-    if (!ctx) return;
-    
-    if (this.oscillators.length > 0) return;
-
-    try {
-      this.filter = ctx.createBiquadFilter();
-      this.filter.type = 'lowpass';
-      this.filter.frequency.setValueAtTime(280, ctx.currentTime);
-      this.filter.Q.setValueAtTime(1.5, ctx.currentTime);
-
-      this.mainGain = ctx.createGain();
-      this.mainGain.gain.setValueAtTime(0, ctx.currentTime);
-      this.mainGain.gain.linearRampToValueAtTime(0.04, ctx.currentTime + 1.5);
-
-      this.filter.connect(this.mainGain);
-      this.mainGain.connect(ctx.destination);
-
-      const frequencies = [110.0, 130.81, 164.81, 196.0];
-
-      frequencies.forEach((freq, idx) => {
-        if (!ctx || !this.filter) return;
-        
-        const osc = ctx.createOscillator();
-        osc.type = idx % 2 === 0 ? 'triangle' : 'sine';
-        osc.frequency.setValueAtTime(freq, ctx.currentTime);
-        
-        osc.detune.setValueAtTime((idx - 1.5) * 8, ctx.currentTime);
-
-        const oscGain = ctx.createGain();
-        oscGain.gain.setValueAtTime(0.18, ctx.currentTime);
-
-        const lfo = ctx.createOscillator();
-        lfo.type = 'sine';
-        lfo.frequency.setValueAtTime(0.1 + idx * 0.05, ctx.currentTime);
-
-        const lfoGain = ctx.createGain();
-        lfoGain.gain.setValueAtTime(0.08, ctx.currentTime);
-
-        lfo.connect(lfoGain);
-        lfoGain.connect(oscGain.gain);
-
-        osc.connect(oscGain);
-        oscGain.connect(this.filter);
-
-        osc.start();
-        lfo.start();
-
-        this.oscillators.push(osc);
-        this.lfos.push(lfo);
-      });
-    } catch (err) {
-      console.warn("Failed to initialize Synth Engine:", err);
-    }
-  }
-
-  stop() {
-    if (!this.ctx) return;
-    
-    if (this.mainGain && this.ctx) {
-      const now = this.ctx.currentTime;
-      try {
-        this.mainGain.gain.setValueAtTime(this.mainGain.gain.value, now);
-        this.mainGain.gain.linearRampToValueAtTime(0, now + 0.3);
-      } catch {}
-    }
-    
-    const activeOscillators = [...this.oscillators];
-    const activeLfos = [...this.lfos];
-    
-    this.oscillators = [];
-    this.lfos = [];
-    this.filter = null;
-    this.mainGain = null;
-
-    setTimeout(() => {
-      activeOscillators.forEach(osc => { try { osc.stop(); } catch {} });
-      activeLfos.forEach(lfo => { try { lfo.stop(); } catch {} });
-    }, 350);
-  }
-
-  playClick() {
-    const ctx = this.getOrInitCtx();
-    if (!ctx) return;
-    try {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(1100, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(380, ctx.currentTime + 0.05);
-      
-      gain.gain.setValueAtTime(0.015, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
-      
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      
-      osc.start();
-      osc.stop(ctx.currentTime + 0.05);
-    } catch (err) {
-      console.warn("Click sound failed:", err);
-    }
-  }
-
-  playSuccess() {
-    const ctx = this.getOrInitCtx();
-    if (!ctx) return;
-    try {
-      const now = ctx.currentTime;
-      
-      const playTone = (freq: number, start: number, duration: number, vol: number) => {
-        if (!ctx) return;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, start);
-        gain.gain.setValueAtTime(0, start);
-        gain.gain.linearRampToValueAtTime(vol, start + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(start);
-        osc.stop(start + duration);
-      };
-
-      playTone(523.25, now, 0.22, 0.02);
-      playTone(659.25, now + 0.06, 0.22, 0.02);
-      playTone(783.99, now + 0.12, 0.3, 0.03);
-    } catch (err) {
-      console.warn("Success sound failed:", err);
-    }
-  }
-
-  playToastPop() {
-    const ctx = this.getOrInitCtx();
-    if (!ctx) return;
-    try {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(280, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(950, ctx.currentTime + 0.1);
-      
-      gain.gain.setValueAtTime(0.02, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
-      
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      
-      osc.start();
-      osc.stop(ctx.currentTime + 0.1);
-    } catch (err) {
-      console.warn("Toast pop sound failed:", err);
-    }
-  }
+function playClick() {
+  if (!siteConfig.uiSounds.enabled) return;
+  const AudioCtx = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioCtx) return;
+  const ctx = new AudioCtx();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(740, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(420, ctx.currentTime + 0.06);
+  gain.gain.setValueAtTime(0.03, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + 0.08);
+  osc.onended = () => ctx.close();
 }
 
-const synth = new SynthEngine();
-
-interface LocalToast {
-  id: string;
-  type: 'success' | 'warning' | 'error';
-  message: string;
-}
-
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'model';
-  text: string;
+function replyTo(text: string) {
+  const q = text.toLowerCase();
+  const hit = siteConfig.chat.replies.find((item) => item.keywords.some((word) => q.includes(word)));
+  return hit?.text ?? siteConfig.chat.fallback;
 }
 
 export default function App() {
-  const [currentPage, setCurrentPage] = useState<'home' | 'projects'>('home');
-
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    const saved = localStorage.getItem('warriorog-theme');
-    return (saved === 'light' || saved === 'dark') ? saved : 'dark';
+  const { profile, theme: themeCfg, music, projects, stack, focus, links, nav, chat } = siteConfig;
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    const saved = localStorage.getItem(themeCfg.storageKey);
+    return saved === 'light' || saved === 'dark' ? saved : themeCfg.defaultMode;
   });
-  const [isMuted, setIsMuted] = useState<boolean>(false);
-  
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  
-  const [toasts, setToasts] = useState<LocalToast[]>([]);
-  
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  const [inputVal, setInputVal] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-
-  const [hoveredProject, setHoveredProject] = useState<string | null>(null);
-
-  const [portfolioStep, setPortfolioStep] = useState<number>(0);
-  const [matrixText, setMatrixText] = useState<string>("SYSTEM_ACTIVE: YES");
-
-  const [buildLogs, setBuildLogs] = useState<string[]>([]);
-  const [buildProgress, setBuildProgress] = useState<number>(0);
-  const [buildStatus, setBuildStatus] = useState<'idle' | 'building' | 'complete'>('idle');
-
-  const [avatarSrc, setAvatarSrc] = useState<string>('https://github.com/WarriorOGZz.png');
-  const [avatarLoaded, setAvatarLoaded] = useState(false);
-  const [avatarErrorCount, setAvatarErrorCount] = useState(0);
-
-  const handleAvatarError = () => {
-    if (avatarErrorCount === 0) {
-      setAvatarSrc('https://upload.wikimedia.org/wikipedia/commons/a/a5/Cillian_Murphy_2014.jpg');
-      setAvatarErrorCount(1);
-    } else if (avatarErrorCount === 1) {
-      setAvatarSrc('https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200&h=200');
-      setAvatarErrorCount(2);
-    } else {
-      setAvatarLoaded(false);
-    }
-  };
-
-  const chatBottomRef = useRef<HTMLDivElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([{ id: 'welcome', role: 'model', text: chat.welcome }]);
+  const [draft, setDraft] = useState('');
+  const [typing, setTyping] = useState(false);
+  const [activeSkill, setActiveSkill] = useState<string>(stack[0].name);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const year = useMemo(() => new Date().getFullYear(), []);
+  const skill = stack.find((item) => item.name === activeSkill) ?? stack[0];
 
   useEffect(() => {
-    setChatHistory([
-      {
-        id: 'welcome',
-        role: 'model',
-        text: "Hey! I'm Ujjwal's AI Twin. I'm trained on his specific fullstack tech stack and projects. Ask me anything about Python backend systems, PyTorch models, or agent automation! 🚀"
-      }
-    ]);
-  }, []);
+    localStorage.setItem(themeCfg.storageKey, theme);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    const bg = theme === 'dark' ? themeCfg.colors.darkBg : themeCfg.colors.lightBg;
+    document.documentElement.style.backgroundColor = bg;
+    document.body.style.backgroundColor = bg;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', bg);
+    document.title = `${profile.name} | ${profile.role}`;
+  }, [theme, themeCfg, profile.name, profile.role]);
 
   useEffect(() => {
-    localStorage.setItem('warriorog-theme', theme);
-    const root = document.documentElement;
-    if (theme === 'dark') {
-      root.classList.add('dark');
-      root.style.backgroundColor = '#000000';
-      document.body.style.backgroundColor = '#000000';
-    } else {
-      root.classList.remove('dark');
-      root.style.backgroundColor = '#f7f7f6';
-      document.body.style.backgroundColor = '#f7f7f6';
-    }
-  }, [theme]);
-
-  useEffect(() => {
-    const resumeAudioOnInteraction = () => {
-      if (!isMuted) {
-        synth.start();
-      }
-    };
-    window.addEventListener('click', resumeAudioOnInteraction, { once: true });
-    window.addEventListener('keydown', resumeAudioOnInteraction, { once: true });
-
-    if (!isMuted) {
-      synth.start();
-    } else {
-      synth.stop();
-    }
+    const audio = new Audio(music.src);
+    audio.loop = true;
+    audio.volume = music.volume;
+    audioRef.current = audio;
     return () => {
-      window.removeEventListener('click', resumeAudioOnInteraction);
-      window.removeEventListener('keydown', resumeAudioOnInteraction);
-      synth.stop();
+      audio.pause();
+      audioRef.current = null;
     };
-  }, [isMuted]);
+  }, [music.src, music.volume]);
 
-  const handleTriggerClick = () => {
-    if (!isMuted) {
-      synth.playClick();
+  useEffect(() => {
+    if (!music.enabled || !music.startAfterInteraction) return;
+    const start = () => {
+      const audio = audioRef.current;
+      if (!audio || muted) return;
+      audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+    };
+    window.addEventListener('pointerdown', start, { once: true });
+    return () => window.removeEventListener('pointerdown', start);
+  }, [muted, music.enabled, music.startAfterInteraction]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.muted = muted;
+    if (muted) audio.pause();
+  }, [muted]);
+
+  const spawn = (message: string) => {
+    const id = crypto.randomUUID();
+    setToasts((prev) => [...prev, { id, message }]);
+    window.setTimeout(() => setToasts((prev) => prev.filter((item) => item.id !== id)), 2800);
+  };
+
+  const toggleMusic = async () => {
+    const audio = audioRef.current;
+    if (!audio || !music.enabled) return;
+    if (playing) {
+      audio.pause();
+      setPlaying(false);
+      return;
+    }
+    setMuted(false);
+    audio.muted = false;
+    try {
+      await audio.play();
+      setPlaying(true);
+    } catch {
+      spawn('Press play again — the browser blocked audio.');
     }
   };
 
-  const toggleSound = () => {
-    setIsMuted(prev => !prev);
-    if (isMuted) {
-      setTimeout(() => synth.playClick(), 50);
-    }
-  };
-
-  const toggleTheme = (e: React.MouseEvent) => {
-    handleTriggerClick();
-    
-    const button = e.currentTarget;
-    const rect = button.getBoundingClientRect();
-    const x = rect.left + rect.width / 2;
-    const y = rect.top + rect.height / 2;
-
+  const toggleTheme = (event: React.MouseEvent) => {
+    playClick();
+    const rect = event.currentTarget.getBoundingClientRect();
     const splash = document.createElement('div');
-    splash.className = `fixed pointer-events-none rounded-full z-[9999] transition-all duration-[600ms] ease-out`;
-    splash.style.left = `${x}px`;
-    splash.style.top = `${y}px`;
+    splash.className = 'fixed pointer-events-none rounded-full z-[80]';
+    splash.style.left = `${rect.left + rect.width / 2}px`;
+    splash.style.top = `${rect.top + rect.height / 2}px`;
     splash.style.width = '0px';
     splash.style.height = '0px';
     splash.style.transform = 'translate(-50%, -50%)';
-    splash.style.backgroundColor = theme === 'dark' ? '#f7f7f6' : '#080808';
-
+    splash.style.transition = 'width 650ms ease, height 650ms ease, opacity 400ms ease';
+    splash.style.background = theme === 'dark' ? themeCfg.colors.lightBg : themeCfg.colors.darkBg;
     document.body.appendChild(splash);
-
     requestAnimationFrame(() => {
-      splash.style.width = '320vw';
-      splash.style.height = '320vw';
+      splash.style.width = '280vw';
+      splash.style.height = '280vw';
     });
-
-    setTimeout(() => {
-      setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+    window.setTimeout(() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark')), 280);
+    window.setTimeout(() => {
       splash.style.opacity = '0';
-    }, 400);
-
-    setTimeout(() => {
-      splash.remove();
-    }, 1000);
+    }, 520);
+    window.setTimeout(() => splash.remove(), 980);
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    setMousePos({
-      x: e.pageX,
-      y: e.pageY
-    });
+  const copyEmail = async () => {
+    playClick();
+    await navigator.clipboard.writeText(profile.email);
+    spawn('Email copied.');
   };
 
-  const handleCardMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    e.currentTarget.style.setProperty('--mouse-x', `${x}px`);
-    e.currentTarget.style.setProperty('--mouse-y', `${y}px`);
+  const sendChat = (text?: string) => {
+    const value = (text ?? draft).trim();
+    if (!value || typing) return;
+    playClick();
+    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'user', text: value }]);
+    setDraft('');
+    setTyping(true);
+    window.setTimeout(() => {
+      setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'model', text: replyTo(value) }]);
+      setTyping(false);
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 520);
   };
 
-  const spawnToast = (type: 'success' | 'warning' | 'error', message: string) => {
-    if (!isMuted) {
-      synth.playToastPop();
-    }
-    const id = Date.now().toString();
-    setToasts(prev => [...prev, { id, type, message }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 3200);
-  };
-
-  const copyEmail = () => {
-    navigator.clipboard.writeText('support@warriorog.space');
-    if (!isMuted) {
-      synth.playSuccess();
-    }
-    spawnToast('success', 'Email copied to clipboard!');
-  };
-
-  const handleSendChat = async (messageText?: string) => {
-    const textToSend = messageText || inputVal;
-    if (!textToSend.trim() || isTyping) return;
-
-    handleTriggerClick();
-    const newUserMsg: ChatMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      text: textToSend
-    };
-
-    setChatHistory(prev => [...prev, newUserMsg]);
-    setInputVal('');
-    setIsTyping(true);
-
-    setTimeout(() => {
-      chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 50);
-
-    try {
-      const formattedLog = chatHistory.concat(newUserMsg).map(item => ({
-        role: item.role,
-        content: item.text
-      }));
-
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: textToSend,
-          history: formattedLog
-        })
-      });
-
-      const data = await response.json();
-      
-      setIsTyping(false);
-      setChatHistory(prev => [...prev, {
-        id: Date.now().toString(),
-        role: 'model',
-        text: data.text || "I'm having a connection blip, but let's keep building! What else can I share about Ujjwal?"
-      }]);
-
-      if (!isMuted) {
-        synth.playToastPop();
-      }
-
-      setTimeout(() => {
-        chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, 50);
-    } catch (err) {
-      setIsTyping(false);
-      setChatHistory(prev => [...prev, {
-        id: Date.now().toString(),
-        role: 'model',
-        text: "I'm currently in offline fallback mode, but Ujjwal's system is fully operational. Ask me anything about Python, PyTorch, or React!"
-      }]);
-    }
-  };
-
-  useEffect(() => {
-    let timer: any;
-    if (hoveredProject === 'warriorog') {
-      timer = setInterval(() => {
-        setPortfolioStep(prev => (prev + 1) % 5);
-        const matrixPhrases = [
-          "CONNECT: OK",
-          "MODEL_LOADED: YES",
-          "AI_TWIN: READY",
-          "LATENCY: 12ms",
-          "AGENT_UPTIME: 100%"
-        ];
-        setMatrixText(matrixPhrases[Math.floor(Math.random() * matrixPhrases.length)]);
-      }, 1500);
-    } else {
-      setPortfolioStep(0);
-      setMatrixText("SYSTEM_ACTIVE: YES");
-    }
-    return () => clearInterval(timer);
-  }, [hoveredProject]);
-
-  useEffect(() => {
-    let timer: any;
-    let progressTimer: any;
-    if (hoveredProject === 'buildnix') {
-      setBuildStatus('building');
-      setBuildProgress(0);
-      setBuildLogs(["🚀 INITIALIZING BUILD ENVIRONMENT...", "📦 COMPILING FLUID MODULES..."]);
-      
-      timer = setInterval(() => {
-        const nextLogs = [
-          "🔍 SECURING COMPILING SCHEMA...",
-          "🐳 GENERATING DOCKER CONTAINER IMAGE...",
-          "⚡ CACHE RESOLVED: 100% HIT",
-          "⚙️ INJECTING PORT ROUTING...",
-          "🌿 COMPRESSION COMPLETED IN 0.3s",
-          "📡 PROVISIONING WORKSPACE ROUTE...",
-          "✔ DEPLOYED SUCCESSFULLY TO CLOUD RUN!"
-        ];
-        
-        setBuildLogs(prev => {
-          if (prev.length >= 8) {
-            clearInterval(timer);
-            setBuildStatus('complete');
-            if (!isMuted) {
-              synth.playSuccess();
-            }
-            return [...prev, "✔ CONTAINER DEPLOYED TO https://buildnix.com/live"];
-          }
-          return [...prev, nextLogs[prev.length - 2]];
-        });
-      }, 1000);
-
-      progressTimer = setInterval(() => {
-        setBuildProgress(prev => {
-          if (prev >= 100) {
-            clearInterval(progressTimer);
-            return 100;
-          }
-          return prev + 12;
-        });
-      }, 600);
-    } else {
-      setBuildStatus('idle');
-      setBuildProgress(0);
-      setBuildLogs([]);
-    }
-    return () => {
-      clearInterval(timer);
-      clearInterval(progressTimer);
-    };
-  }, [hoveredProject]);
-
-  const upToDownFadeBlur = {
-    initial: { opacity: 0, y: -25, filter: 'blur(12px)' },
-    animate: { opacity: 1, y: 0, filter: 'blur(0px)' },
-    exit: { opacity: 0, y: 25, filter: 'blur(12px)' },
-    transition: { duration: 0.65, ease: [0.16, 1, 0.3, 1] }
-  };
+  const glow = theme === 'dark' ? themeCfg.colors.darkGlow : themeCfg.colors.lightGlow;
 
   return (
-    <div
-      id="portfolio-root"
-      className={`min-h-screen relative flex flex-col items-center justify-center transition-colors duration-500 overflow-x-hidden font-sans selection:bg-amber-400/30 selection:text-neutral-900 ${
-        theme === 'dark' ? 'bg-black text-[#f5f5f5]' : 'bg-[#f7f7f6] text-[#1c1c1c]'
-      }`}
-      onMouseMove={handleMouseMove}
-    >
+    <div className="relative min-h-screen overflow-x-hidden font-sans text-ink dark:text-[#f4eefe]">
+      <div className="grid-fade pointer-events-none absolute inset-0" />
       <div
-        id="dotted-grid-bg"
-        className="absolute inset-0 pointer-events-none transition-all duration-500"
-        style={{
-          backgroundImage: theme === 'dark'
-            ? 'linear-gradient(to right, rgba(255, 255, 255, 0.015) 1px, transparent 1px), linear-gradient(to bottom, rgba(255, 255, 255, 0.015) 1px, transparent 1px)'
-            : 'linear-gradient(to right, rgba(0, 0, 0, 0.012) 1px, transparent 1px), linear-gradient(to bottom, rgba(0, 0, 0, 0.012) 1px, transparent 1px)',
-          backgroundSize: '40px 40px',
-          maskImage: 'radial-gradient(circle at 50% 50%, black 80%, transparent)',
-          WebkitMaskImage: 'radial-gradient(circle at 50% 50%, black 80%, transparent)'
-        }}
+        className="pointer-events-none absolute inset-0"
+        style={{ background: `radial-gradient(520px circle at 70% 0%, ${glow}, transparent 60%)` }}
       />
 
-      <div
-        id="glow-aura"
-        className="absolute inset-0 pointer-events-none z-0 transition-opacity duration-500 opacity-70"
-        style={{
-          background: `radial-gradient(circle 350px at ${mousePos.x}px ${mousePos.y}px, ${
-            theme === 'dark' ? 'rgba(245, 158, 11, 0.05)' : 'rgba(59, 130, 246, 0.04)'
-          }, transparent 100%)`
-        }}
-      />
+      <header className="sticky top-0 z-20 border-b border-violet-200/70 bg-[#f6f3fb]/80 backdrop-blur-md dark:border-violet-400/15 dark:bg-[#100818]/75">
+        <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-5">
+          <a href="#top" className="flex items-center gap-2.5 font-semibold tracking-tight">
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-violet-600 text-sm text-white">
+              {profile.monogram}
+            </span>
+            {profile.name}
+          </a>
+          <nav className="hidden items-center gap-6 text-sm text-neutral-500 sm:flex dark:text-violet-200/70">
+            {nav.map((item) => (
+              <a key={item.href} href={item.href} className="hover:text-violet-700 dark:hover:text-white">
+                {item.label}
+              </a>
+            ))}
+          </nav>
+          <div className="flex items-center gap-1 rounded-full border border-violet-200/80 bg-white/80 p-1 dark:border-violet-400/20 dark:bg-white/5">
+            <IconButton label={playing ? 'Pause music' : 'Play music'} onClick={toggleMusic}>
+              {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            </IconButton>
+            <IconButton label={muted ? 'Unmute' : 'Mute'} onClick={() => setMuted((value) => !value)}>
+              {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+            </IconButton>
+            <IconButton label="Toggle theme" onClick={toggleTheme}>
+              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </IconButton>
+          </div>
+        </div>
+      </header>
 
-      <div
-        className={`w-full px-6 py-14 relative z-10 flex flex-col justify-center transition-all duration-500 ${
-          currentPage === 'home' ? 'max-w-[490px]' : 'max-w-[720px]'
-        }`}
-      >
-        <AnimatePresence mode="wait">
-          
-          {currentPage === 'home' && (
-            <motion.div
-              key="home"
-              {...upToDownFadeBlur}
-              className="w-full flex flex-col"
-            >
-              <header className="flex items-start justify-between w-full mb-12">
-                <div className="flex items-center gap-4">
-                  <div className="relative w-12 h-12 rounded-full overflow-hidden border border-neutral-200/60 dark:border-neutral-800/70 bg-neutral-100 dark:bg-neutral-900 shadow-sm flex items-center justify-center">
-                    <img
-                      src={avatarSrc}
-                      alt="WarriorOG"
-                      referrerPolicy="no-referrer"
-                      className={`w-full h-full object-cover absolute inset-0 transition-opacity duration-300 z-10 ${
-                        avatarLoaded ? 'opacity-100' : 'opacity-0'
-                      }`}
-                      onLoad={() => setAvatarLoaded(true)}
-                      onError={handleAvatarError}
-                    />
-
-                    <div className="w-full h-full absolute inset-0 flex items-center justify-center bg-stone-950">
-                      <svg viewBox="0 0 100 100" className="w-full h-full text-amber-500">
-                        <defs>
-                          <radialGradient id="shelbyGlow" cx="50%" cy="50%" r="50%">
-                            <stop offset="0%" stopColor="#d97706" stopOpacity="0.4" />
-                            <stop offset="100%" stopColor="#171717" stopOpacity="0" />
-                          </radialGradient>
-                          <linearGradient id="hairGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stopColor="#451a03" />
-                            <stop offset="100%" stopColor="#171717" />
-                          </linearGradient>
-                        </defs>
-                        <circle cx="50" cy="50" r="50" fill="#0c0a09" />
-                        <circle cx="50" cy="45" r="35" fill="url(#shelbyGlow)" />
-                        <g transform="translate(0, 5)">
-                          <path d="M 12,90 C 12,70 25,60 40,58 L 44,65 L 50,65 L 56,65 L 60,58 C 75,60 88,70 88,90 Z" fill="#1c1917" stroke="#2e2a24" strokeWidth="1" />
-                          <path d="M 42,58 L 50,75 L 58,58 Z" fill="#fafaf9" />
-                          <path d="M 48,68 L 52,68 L 54,90 L 46,90 Z" fill="#0c0a09" />
-                          <path d="M 40,58 L 47,69 L 45,58 Z" fill="#e7e5e4" />
-                          <path d="M 60,58 L 53,69 L 55,58 Z" fill="#e7e5e4" />
-                          <path d="M 44,45 C 44,55 46,60 50,60 C 54,60 56,55 56,45 Z" fill="#2e2a24" />
-                          <path d="M 38,32 C 38,18 48,15 58,18 C 66,20 68,32 64,44 C 60,50 50,52 44,50 C 38,48 38,40 38,32 Z" fill="#1c1917" />
-                          <path d="M 39,32 C 39,24 44,19 50,19 C 54,19 55,23 53,28 C 50,33 46,36 41,36 Z" fill="#d97706" opacity="0.4" />
-                          <path d="M 36,32 C 36,20 46,12 58,14 C 66,15 67,23 62,26 C 58,28 50,23 44,28 C 40,31 38,34 36,32 Z" fill="url(#hairGrad)" stroke="#d97706" strokeWidth="0.5" />
-                          <path d="M 34,26 C 35,16 45,10 58,11 C 66,12 70,18 70,24 C 62,24 50,20 42,24 C 38,26 36,28 34,26 Z" fill="#292524" />
-                        </g>
-                      </svg>
-                    </div>
-                  </div>
-                  
-                  <div className="flex flex-col">
-                    <h1 className="text-xl font-bold font-serif italic tracking-tight text-neutral-900 dark:text-white flex items-center gap-1">
-                      WarriorOG
-                    </h1>
-                    <p className="text-[11px] font-sans text-neutral-500 dark:text-neutral-400 font-medium tracking-wide">
-                      Frontend Engineer & UI/UX Designer
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 bg-neutral-100/80 dark:bg-neutral-900/60 border border-neutral-200/50 dark:border-neutral-800/60 px-3 py-1.5 rounded-full backdrop-blur-md shadow-sm">
-                  <button
-                    onClick={toggleSound}
-                    className="p-1 rounded-full hover:bg-neutral-500/10 cursor-pointer transition-colors"
-                    title={isMuted ? "Unmute Sound" : "Mute Sound"}
-                  >
-                    {isMuted ? (
-                      <VolumeX className="w-4 h-4 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors" />
-                    ) : (
-                      <Volume2 className="w-4 h-4 text-amber-500" />
-                    )}
-                  </button>
-                  <div className="w-[1px] h-3.5 bg-neutral-300 dark:bg-neutral-800" />
-                  <button
-                    onClick={toggleTheme}
-                    className="p-1 rounded-full hover:bg-neutral-500/10 cursor-pointer transition-colors"
-                    title="Toggle Theme"
-                  >
-                    {theme === 'dark' ? (
-                      <Sun className="w-4 h-4 text-amber-400" />
-                    ) : (
-                      <Moon className="w-4 h-4 text-neutral-600 dark:text-neutral-800" />
-                    )}
-                  </button>
-                </div>
-              </header>
-
-              <main className="space-y-6 text-neutral-700 dark:text-neutral-300 leading-[1.75] text-[15px] md:text-[16px]">
-                <p>
-                  I'm a 15 y/o mobile design engineer working in{' '}
-                  <span
-                    onClick={() => { handleTriggerClick(); spawnToast('success', 'Python powers WarriorOG\'s custom intelligence workflows!'); }}
-                    className="inline-flex items-center gap-1 font-semibold text-neutral-900 dark:text-white cursor-pointer select-none border-b-2 border-amber-500/40 hover:border-amber-500 transition-all pb-0.5"
-                  >
-                    <svg className="w-3.5 h-3.5 text-amber-500" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 2c-5.52 0-10 4.48-10 10s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1.65 14.5c-.5 0-.9-.4-.9-.9s.4-.9.9-.9.9.4.9.9-.4.9-.9.9zm.35-4.5H10V9.5h4V12z" />
-                    </svg>
-                    Python
-                  </span>
-                  ,{' '}
-                  <span
-                    onClick={() => { handleTriggerClick(); spawnToast('success', 'PyTorch drives machine learning and automated modeling!'); }}
-                    className="inline-flex items-center gap-1 font-semibold text-neutral-900 dark:text-white cursor-pointer select-none border-b-2 border-orange-500/40 hover:border-orange-500 transition-all pb-0.5"
-                  >
-                    <svg className="w-3.5 h-3.5 text-orange-500" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 4c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 13l-4-4h8l-4 4z" />
-                    </svg>
-                    PyTorch
-                  </span>
-                  , and{' '}
-                  <span
-                    onClick={() => { handleTriggerClick(); spawnToast('success', 'React is used to construct elegant, highly responsive frontends!'); }}
-                    className="inline-flex items-center gap-1 font-semibold text-neutral-900 dark:text-white cursor-pointer select-none border-b-2 border-cyan-500/40 hover:border-cyan-500 transition-all pb-0.5"
-                  >
-                    <svg className="w-3.5 h-3.5 text-cyan-500 animate-[spin_8s_linear_infinite]" viewBox="-11.5 -10.23 23 20.46">
-                      <circle cx="0" cy="0" r="2.05" fill="currentColor" />
-                      <g stroke="currentColor" strokeWidth="1" fill="none">
-                        <ellipse rx="11" ry="4.2" />
-                        <ellipse rx="11" ry="4.2" transform="rotate(60)" />
-                        <ellipse rx="11" ry="4.2" transform="rotate(120)" />
-                      </g>
-                    </svg>
-                    React
-                  </span>
-                  .
-                </p>
-
-                <p>
-                  Currently exploring{' '}
-                  <span className="relative inline-block group cursor-pointer font-semibold text-neutral-900 dark:text-white transition-colors hover:text-pink-400">
-                    native motion
-                    <svg className="absolute left-0 -bottom-1 w-full h-1.5 pointer-events-none" viewBox="0 0 100 8" preserveAspectRatio="none">
-                      <path d="M 0,4 Q 25,1 50,4 T 100,4" fill="none" stroke="#f472b6" strokeWidth="2.2" strokeLinecap="round" />
-                    </svg>
-                  </span>
-                  , haptics, and the small details that make apps feel alive.
-                </p>
-
-                <p>
-                  Check out some of my highlighted{' '}
-                  <button
-                    onClick={() => {
-                      handleTriggerClick();
-                      setCurrentPage('projects');
-                    }}
-                    className="relative inline-flex items-center gap-1.5 font-bold text-neutral-900 dark:text-white cursor-pointer group"
-                  >
-                    <span className="relative z-10 hover:text-pink-400 transition-colors">
-                      projects
-                      <svg className="absolute left-0 -bottom-1 w-full h-1.5 pointer-events-none" viewBox="0 0 100 8" preserveAspectRatio="none">
-                        <path d="M 1,5 Q 35,2 70,5 T 99,3" fill="none" stroke="#f472b6" strokeWidth="2.2" strokeLinecap="round" />
-                      </svg>
-                    </span>
-                    <span className="inline-block relative -top-0.5 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform duration-200">
-                      <svg className="w-3.5 h-3.5 text-pink-400" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
-                      </svg>
-                    </span>
-                  </button>
-                  .
-                </p>
-              </main>
-
-              <div className="flex items-center gap-3.5 mt-12 pt-8 border-t border-neutral-200/40 dark:border-neutral-800/50">
+      <main id="top" className="relative z-10 mx-auto w-full max-w-5xl px-5 pb-28">
+        <section className="grid items-end gap-10 py-16 sm:py-24 lg:grid-cols-[1.4fr_0.8fr]">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.22em] text-violet-600 dark:text-violet-300">
+              {profile.availability} · {profile.location}
+            </p>
+            <h1 className="mt-4 max-w-3xl text-5xl font-semibold leading-[0.96] tracking-tight sm:text-7xl">
+              Interfaces in{' '}
+              <span className="text-violet-600 dark:text-violet-300">{profile.accentWord}</span>, typed and shipped.
+            </h1>
+            <p className="mt-6 max-w-xl text-lg leading-relaxed text-neutral-600 dark:text-violet-100/75">
+              {profile.bio[0]}
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <a href="#work" className="rounded-full bg-violet-600 px-5 py-3 text-sm font-medium text-white shadow-lg shadow-violet-600/25 hover:bg-violet-500">
+                Selected work
+              </a>
+              <button
+                onClick={copyEmail}
+                className="inline-flex items-center gap-2 rounded-full border border-violet-200 px-5 py-3 text-sm font-medium hover:bg-white dark:border-violet-400/30 dark:hover:bg-white/5"
+              >
+                <Mail className="h-4 w-4" />
+                {profile.email}
+              </button>
+              <button onClick={() => setChatOpen(true)} className="px-3 text-sm font-medium text-violet-700 dark:text-violet-200">
+                Ask {profile.name}
+              </button>
+            </div>
+          </div>
+          <aside className="rounded-3xl border border-violet-200/80 bg-white/70 p-5 shadow-sm dark:border-violet-400/15 dark:bg-white/5">
+            <p className="text-xs uppercase tracking-[0.18em] text-violet-500">Now</p>
+            <p className="mt-3 text-2xl font-semibold tracking-tight">{skill.name}</p>
+            <p className="mt-2 text-sm leading-relaxed text-neutral-500 dark:text-violet-200/70">{skill.detail}</p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              {stack.slice(0, 6).map((item) => (
                 <button
-                  id="cta-send"
+                  key={item.name}
                   onClick={() => {
-                    handleTriggerClick();
-                    setIsChatOpen(true);
+                    playClick();
+                    setActiveSkill(item.name);
                   }}
-                  className={`px-6 py-3.5 rounded-full font-bold flex items-center gap-2 shadow-sm hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 cursor-pointer text-xs uppercase tracking-wider ${
-                    theme === 'dark'
-                      ? 'bg-white hover:bg-neutral-200 text-[#080808]'
-                      : 'bg-[#1c1c1c] hover:bg-[#2d2d2d] text-white'
+                  className={`rounded-full px-3 py-1 text-xs font-medium ${
+                    item.name === skill.name
+                      ? 'bg-violet-600 text-white'
+                      : 'bg-violet-50 text-violet-800 dark:bg-violet-400/10 dark:text-violet-100'
                   }`}
                 >
-                  <Send className="w-3.5 h-3.5" />
-                  Send Message
+                  {item.name}
                 </button>
+              ))}
+            </div>
+          </aside>
+        </section>
 
-                <button
-                  id="cta-copy"
-                  onClick={copyEmail}
-                  className={`px-6 py-3.5 rounded-full font-semibold flex items-center gap-2 border hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 cursor-pointer text-xs uppercase tracking-wider ${
-                    theme === 'dark'
-                      ? 'bg-transparent border-neutral-800 text-neutral-300 hover:bg-neutral-900/40'
-                      : 'bg-transparent border-neutral-300 text-neutral-700 hover:bg-neutral-100'
-                  }`}
-                >
-                  <Mail className="w-3.5 h-3.5" />
-                  Copy Email
-                </button>
-              </div>
-            </motion.div>
-          )}
+        <div className="overflow-hidden border-y border-violet-200/70 py-3 dark:border-violet-400/15">
+          <div className="marquee-track flex w-max gap-8 pr-8 text-sm font-medium tracking-wide text-violet-700/80 dark:text-violet-200/70">
+            {[...stack, ...stack].map((item, index) => (
+              <span key={`${item.name}-${index}`} className="flex items-center gap-8">
+                {item.name}
+                <span className="h-1 w-1 rounded-full bg-violet-400" />
+              </span>
+            ))}
+          </div>
+        </div>
 
-          {currentPage === 'projects' && (
-            <motion.div
-              key="projects"
-              {...upToDownFadeBlur}
-              className="w-full flex flex-col"
-            >
-              <header className="flex items-center justify-between w-full mb-10">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      handleTriggerClick();
-                      setCurrentPage('home');
-                    }}
-                    className="p-3 bg-neutral-100/80 dark:bg-neutral-900/60 border border-neutral-200/50 dark:border-neutral-800/60 rounded-xl hover:bg-neutral-200/50 dark:hover:bg-neutral-800/50 cursor-pointer transition-colors shadow-sm"
-                    title="Go Home"
-                  >
-                    <Home className="w-4 h-4 text-neutral-800 dark:text-white" />
-                  </button>
-                  <button
-                    onClick={() => {
-                      handleTriggerClick();
-                      setCurrentPage('home');
-                    }}
-                    className="p-3 bg-neutral-100/80 dark:bg-neutral-900/60 border border-neutral-200/50 dark:border-neutral-800/60 rounded-xl hover:bg-neutral-200/50 dark:hover:bg-neutral-800/50 cursor-pointer transition-colors shadow-sm"
-                    title="Back"
-                  >
-                    <ArrowLeft className="w-4 h-4 text-neutral-800 dark:text-white" />
-                  </button>
+        <section id="stack" className="py-16">
+          <SectionLabel index="01" title="Stack" />
+          <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {stack.map((item) => (
+              <button
+                key={item.name}
+                onClick={() => {
+                  playClick();
+                  setActiveSkill(item.name);
+                  spawn(item.detail);
+                }}
+                className="rounded-2xl border border-violet-200/80 bg-white/75 p-4 text-left transition hover:-translate-y-0.5 hover:border-violet-400 dark:border-violet-400/15 dark:bg-white/5"
+              >
+                <p className="text-lg font-semibold tracking-tight">{item.name}</p>
+                <p className="mt-2 text-sm text-neutral-500 dark:text-violet-200/65">{item.detail}</p>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section id="work" className="py-6">
+          <SectionLabel index="02" title="Selected work" />
+          <div className="mt-8 grid gap-4 md:grid-cols-2">
+            {projects.map((project, index) => (
+              <a
+                key={project.id}
+                href={project.href}
+                target="_blank"
+                rel="noreferrer"
+                className="group rounded-3xl border border-violet-200/80 bg-white/75 p-5 transition hover:-translate-y-0.5 hover:border-violet-400 hover:shadow-xl hover:shadow-violet-500/10 dark:border-violet-400/15 dark:bg-white/5"
+              >
+                <div className="mb-8 flex h-36 items-end justify-between rounded-2xl bg-gradient-to-br from-violet-100 via-white to-fuchsia-50 p-4 dark:from-violet-950 dark:via-[#1a1028] dark:to-fuchsia-950/30">
+                  <span className="text-4xl font-semibold tracking-tight text-violet-300 dark:text-violet-700">
+                    0{index + 1}
+                  </span>
+                  <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-medium text-violet-700 dark:bg-white/10 dark:text-violet-100">
+                    {project.year}
+                  </span>
                 </div>
-
-                <div className="flex items-center gap-1.5 bg-neutral-100/80 dark:bg-neutral-900/60 border border-neutral-200/50 dark:border-neutral-800/60 px-3 py-1.5 rounded-full backdrop-blur-md shadow-sm">
-                  <button
-                    onClick={toggleSound}
-                    className="p-1 rounded-full hover:bg-neutral-500/10 cursor-pointer transition-colors"
-                    title={isMuted ? "Unmute Sound" : "Mute Sound"}
-                  >
-                    {isMuted ? (
-                      <VolumeX className="w-4 h-4 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors" />
-                    ) : (
-                      <Volume2 className="w-4 h-4 text-amber-500" />
-                    )}
-                  </button>
-                  <div className="w-[1px] h-3.5 bg-neutral-300 dark:bg-neutral-800" />
-                  <button
-                    onClick={toggleTheme}
-                    className="p-1 rounded-full hover:bg-neutral-500/10 cursor-pointer transition-colors"
-                    title="Toggle Theme"
-                  >
-                    {theme === 'dark' ? (
-                      <Sun className="w-4 h-4 text-amber-400" />
-                    ) : (
-                      <Moon className="w-4 h-4 text-neutral-600 dark:text-neutral-800" />
-                    )}
-                  </button>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-2xl font-semibold tracking-tight">{project.title}</h3>
+                    <p className="mt-2 text-sm leading-relaxed text-neutral-500 dark:text-violet-200/70">{project.summary}</p>
+                  </div>
+                  <ArrowUpRight className="mt-1 h-5 w-5 text-violet-500 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                 </div>
-              </header>
-
-              <div className="mb-10 text-left">
-                <h2 className="text-4xl md:text-[46px] font-bold font-serif italic text-neutral-900 dark:text-white leading-tight">
-                  Highlighted Projects
-                </h2>
-                <p className="text-sm font-sans opacity-60 text-neutral-500 dark:text-neutral-400 mt-2.5">
-                  A few highlighted projects I've worked on.
-                </p>
-              </div>
-
-              <div className="space-y-12">
-                
-                <div className="flex flex-col w-full">
-                  <div
-                    onMouseEnter={() => {
-                      setHoveredProject('warriorog');
-                      if (!isMuted) synth.playClick();
-                    }}
-                    onMouseLeave={() => setHoveredProject(null)}
-                    onMouseMove={handleCardMouseMove}
-                    className="relative w-full aspect-[16/10] rounded-3xl bg-neutral-50 dark:bg-[#0a0a0c] border border-neutral-250 dark:border-neutral-900 overflow-hidden shadow-md transition-all duration-500 hover:border-amber-500/40 dark:hover:border-amber-500/40 hover:scale-[1.015] hover:shadow-2xl hover:shadow-amber-500/[0.02] group cursor-pointer"
-                  >
-                    <div className="absolute inset-4 rounded-2xl bg-[#ebebeb] dark:bg-[#121212] border border-neutral-200/60 dark:border-neutral-800/80 overflow-hidden shadow-inner flex flex-col justify-between p-6" />
-                  </div>
-
-                  <div className="flex items-center justify-between w-full mt-4 px-1.5">
-                    <a
-                      href="https://warriorog.in"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-bold text-lg font-sans text-neutral-900 dark:text-white flex items-center gap-1.5 hover:text-pink-400 transition-colors"
-                    >
-                      WarriorOG.in Portfolio
-                      <span className="inline-block relative -top-0.5">
-                        <svg className="w-4 h-4 text-neutral-500" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
-                        </svg>
-                      </span>
-                    </a>
-                    <span className="font-mono text-sm opacity-50 font-semibold text-neutral-500 dark:text-neutral-400">2026</span>
-                  </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {project.tags.map((tag) => (
+                    <span key={tag} className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700 dark:bg-violet-400/10 dark:text-violet-200">
+                      {tag}
+                    </span>
+                  ))}
                 </div>
+              </a>
+            ))}
+          </div>
+        </section>
 
-                <div className="flex flex-col w-full">
-                  <div
-                    onMouseEnter={() => {
-                      setHoveredProject('buildnix');
-                      if (!isMuted) synth.playClick();
-                    }}
-                    onMouseLeave={() => setHoveredProject(null)}
-                    onMouseMove={handleCardMouseMove}
-                    className="relative w-full aspect-[16/10] rounded-3xl bg-neutral-50 dark:bg-[#0a0a0c] border border-neutral-250 dark:border-neutral-900 overflow-hidden shadow-md transition-all duration-500 hover:border-cyan-500/40 dark:hover:border-cyan-500/40 hover:scale-[1.015] hover:shadow-2xl hover:shadow-cyan-500/[0.02] group cursor-pointer"
-                  >
-                    <div className="absolute inset-4 rounded-2xl bg-[#ebebeb] dark:bg-[#121212] border border-neutral-200/60 dark:border-neutral-800/80 overflow-hidden shadow-inner flex flex-col justify-between p-6" />
-                  </div>
-
-                  <div className="flex items-center justify-between w-full mt-4 px-1.5">
-                    <a
-                      href="https://buildnix.com"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-bold text-lg font-sans text-neutral-900 dark:text-white flex items-center gap-1.5 hover:text-pink-400 transition-colors"
-                    >
-                      buildnix.com
-                      <span className="inline-block relative -top-0.5">
-                        <svg className="w-4 h-4 text-neutral-500" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
-                        </svg>
-                      </span>
-                    </a>
-                    <span className="font-mono text-sm opacity-50 font-semibold text-neutral-500 dark:text-neutral-400">2026</span>
-                  </div>
+        <section id="about" className="grid gap-8 py-16 lg:grid-cols-[0.8fr_1.2fr]">
+          <SectionLabel index="03" title="About" />
+          <div>
+            {profile.bio.map((line) => (
+              <p key={line} className="mb-4 text-lg leading-relaxed text-neutral-600 dark:text-violet-100/75">
+                {line}
+              </p>
+            ))}
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              {focus.map((item) => (
+                <div key={item.title} className="rounded-2xl border border-violet-200/70 p-4 dark:border-violet-400/15">
+                  <p className="font-semibold">{item.title}</p>
+                  <p className="mt-2 text-sm text-neutral-500 dark:text-violet-200/65">{item.text}</p>
                 </div>
+              ))}
+            </div>
+            <ul className="mt-6 flex flex-wrap gap-x-5 text-sm text-neutral-500 dark:text-violet-200/70">
+              {links.map((link) => (
+                <li key={link.label}>
+                  <a href={link.href} className="inline-flex items-center gap-1 hover:text-violet-600 dark:hover:text-white">
+                    {link.label}
+                    <ArrowUpRight className="h-3.5 w-3.5" />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
 
-              </div>
+        <footer className="flex items-center justify-between border-t border-violet-200/70 py-6 text-xs uppercase tracking-[0.18em] text-neutral-400 dark:border-violet-400/15">
+          <span>Made by {profile.name}</span>
+          <span>{themeCfg.font} · {year}</span>
+        </footer>
+      </main>
 
-              <footer className="w-full text-center mt-16 pt-8 border-t border-neutral-200/40 dark:border-neutral-800/50">
-                <p className="text-[10px] font-mono opacity-45 uppercase tracking-widest flex items-center justify-center gap-1 text-neutral-500 dark:text-neutral-400">
-                  made by warriorog
-                </p>
-              </footer>
-            </motion.div>
-          )}
-
-        </AnimatePresence>
-      </div>
+      {music.enabled && (
+        <button
+          onClick={toggleMusic}
+          className="fixed bottom-5 left-5 z-30 flex items-center gap-3 rounded-full border border-violet-200/80 bg-white/90 px-3 py-2 text-left shadow-lg shadow-violet-500/10 backdrop-blur dark:border-violet-400/20 dark:bg-[#1a1028]/90"
+        >
+          <span className="grid h-9 w-9 place-items-center rounded-full bg-violet-600 text-white">
+            <Music2 className="h-4 w-4" />
+          </span>
+          <span>
+            <span className="block text-sm font-medium leading-none">{music.title}</span>
+            <span className="mt-1 block text-[11px] text-neutral-500 dark:text-violet-200/60">
+              {music.artist} · {playing && !muted ? 'Playing' : 'Paused'}
+            </span>
+          </span>
+          <span className="ml-1 flex h-4 items-end gap-0.5">
+            {[0, 1, 2].map((bar) => (
+              <span
+                key={bar}
+                className="eq-bar w-0.5 rounded-full bg-violet-500"
+                style={{ height: 14, animationDelay: `${bar * 0.15}s`, animationPlayState: playing && !muted ? 'running' : 'paused' }}
+              />
+            ))}
+          </span>
+        </button>
+      )}
 
       <AnimatePresence>
-        {isChatOpen && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-end bg-black/40 backdrop-blur-[3px] pointer-events-auto">
-            <div className="absolute inset-0" onClick={() => setIsChatOpen(false)} />
-
-            <motion.div
-              initial={{ x: '100%', filter: 'blur(10px)' }}
-              animate={{ x: 0, filter: 'blur(0px)' }}
-              exit={{ x: '100%', filter: 'blur(10px)' }}
-              transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-              className={`w-full max-w-md h-full relative z-10 flex flex-col shadow-2xl ${
-                theme === 'dark' ? 'bg-[#0d0d0f] border-l border-neutral-800/80' : 'bg-white border-l border-neutral-200'
-              }`}
-            >
-              <div className={`p-4 border-b flex items-center justify-between ${
-                theme === 'dark' ? 'border-neutral-800/80' : 'border-neutral-200'
-              }`}>
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                  <span className="font-serif font-bold italic text-md text-neutral-900 dark:text-white">WarriorOG AI Twin</span>
+        {chatOpen && (
+          <motion.aside
+            initial={{ x: 24, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 24, opacity: 0 }}
+            className="fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col border-l border-violet-200 bg-[#fbf9ff] shadow-2xl dark:border-violet-400/20 dark:bg-[#140c1e]"
+          >
+            <div className="flex items-center justify-between border-b border-violet-100 px-5 py-4 dark:border-violet-400/15">
+              <div>
+                <p className="text-lg font-semibold">{chat.title}</p>
+                <p className="text-xs text-neutral-500">Replies come from config</p>
+              </div>
+              <button onClick={() => setChatOpen(false)} className="text-sm text-violet-600">Close</button>
+            </div>
+            <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
+              {messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
+                    message.role === 'user' ? 'ml-auto bg-violet-600 text-white' : 'bg-white text-neutral-700 dark:bg-white/5 dark:text-violet-100'
+                  }`}
+                >
+                  {message.text}
                 </div>
-                <button
-                  onClick={() => setIsChatOpen(false)}
-                  className="p-1.5 rounded-full hover:bg-neutral-500/10 cursor-pointer transition-colors text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-white"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 scrollbar-thin">
-                {chatHistory.map(msg => (
-                  <div
-                    key={msg.id}
-                    className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div
-                      className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-xs leading-relaxed ${
-                        msg.role === 'user'
-                          ? theme === 'dark'
-                            ? 'bg-white text-neutral-950 font-semibold'
-                            : 'bg-neutral-900 text-white'
-                          : theme === 'dark'
-                          ? 'bg-neutral-900/60 text-neutral-200 border border-neutral-800/80'
-                          : 'bg-neutral-100 text-neutral-800 border border-neutral-200'
-                      }`}
-                    >
-                      {msg.text}
-                    </div>
-                  </div>
-                ))}
-
-                {isTyping && (
-                  <div className="flex justify-start">
-                    <div
-                      className={`px-3.5 py-2 rounded-xl text-xs flex items-center gap-1 ${
-                        theme === 'dark' ? 'bg-neutral-900/50 border border-neutral-800/50' : 'bg-neutral-100 border border-neutral-200'
-                      }`}
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-bounce" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-bounce [animation-delay:0.15s]" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-bounce [animation-delay:0.3s]" />
-                    </div>
-                  </div>
-                )}
-                <div ref={chatBottomRef} />
-              </div>
-
-              <div className="px-4 py-3 flex flex-wrap gap-1.5 max-h-24 overflow-y-auto border-t border-neutral-500/10 pt-3">
-                <button
-                  onClick={() => handleSendChat("Tell me about WarriorOG.in")}
-                  className="px-3 py-1 rounded-full border border-neutral-500/15 text-[10px] hover:border-pink-400 hover:text-pink-400 transition-colors cursor-pointer text-left font-mono"
-                >
-                  Portfolio Site 🎨
-                </button>
-                <button
-                  onClick={() => handleSendChat("What build processes does buildnix.com compile?")}
-                  className="px-3 py-1 rounded-full border border-neutral-500/15 text-[10px] hover:border-pink-400 hover:text-pink-400 transition-colors cursor-pointer text-left font-mono"
-                >
-                  Buildnix Compiler ⚡
-                </button>
-                <button
-                  onClick={() => handleSendChat("What is your developer tech stack?")}
-                  className="px-3 py-1 rounded-full border border-neutral-500/15 text-[10px] hover:border-pink-400 hover:text-pink-400 transition-colors cursor-pointer text-left font-mono"
-                >
-                  Tech Stack 🧠
-                </button>
-              </div>
-
-              <div className={`p-3.5 border-t flex items-center gap-2.5 ${
-                theme === 'dark' ? 'border-neutral-800/80' : 'border-neutral-200'
-              }`}>
-                <input
-                  type="text"
-                  value={inputVal}
-                  onChange={e => setInputVal(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') handleSendChat();
-                  }}
-                  placeholder="Ask WarriorOG's AI Twin..."
-                  className={`flex-1 px-4 py-3 rounded-xl text-xs border focus:outline-none transition-colors ${
-                    theme === 'dark'
-                      ? 'bg-neutral-900/60 border-neutral-800 focus:border-white text-white'
-                      : 'bg-neutral-50 border-neutral-200 focus:border-neutral-900 text-neutral-950'
-                  }`}
-                />
-                <button
-                  onClick={() => handleSendChat()}
-                  className={`p-3 rounded-xl transition-all cursor-pointer ${
-                    theme === 'dark'
-                      ? 'bg-white hover:bg-neutral-200 text-neutral-950'
-                      : 'bg-neutral-900 hover:bg-neutral-800 text-white'
-                  }`}
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </motion.div>
-          </div>
+              ))}
+              {typing && <p className="text-xs text-violet-500">{profile.name} is typing…</p>}
+              <div ref={chatEndRef} />
+            </div>
+            <form
+              className="flex gap-2 border-t border-violet-100 p-4 dark:border-violet-400/15"
+              onSubmit={(event) => {
+                event.preventDefault();
+                sendChat();
+              }}
+            >
+              <input
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                placeholder={chat.placeholder}
+                className="flex-1 rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-500 dark:border-violet-400/20 dark:bg-white/5"
+              />
+              <button className="grid h-10 w-10 place-items-center rounded-xl bg-violet-600 text-white" aria-label="Send">
+                <Send className="h-4 w-4" />
+              </button>
+            </form>
+          </motion.aside>
         )}
       </AnimatePresence>
 
-      <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-2 pointer-events-none">
+      <div className="fixed bottom-5 right-5 z-30 flex flex-col gap-2">
         <AnimatePresence>
-          {toasts.map(toast => (
+          {toasts.map((toast) => (
             <motion.div
               key={toast.id}
-              initial={{ y: 50, opacity: 0, scale: 0.9, filter: 'blur(5px)' }}
-              animate={{ y: 0, opacity: 1, scale: 1, filter: 'blur(0px)' }}
-              exit={{ y: -20, opacity: 0, scale: 0.9 }}
-              transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-              className={`px-4.5 py-3 rounded-xl border shadow-lg text-[10px] font-mono flex items-center gap-2 pointer-events-auto ${
-                toast.type === 'success'
-                  ? 'bg-green-950/90 border-green-500/30 text-green-200'
-                  : toast.type === 'warning'
-                  ? 'bg-yellow-950/90 border-yellow-500/30 text-yellow-200'
-                  : 'bg-red-950/90 border-red-500/30 text-red-200'
-              }`}
+              initial={{ y: 8, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex items-center gap-2 rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm shadow-lg dark:border-violet-400/20 dark:bg-[#1c122b]"
             >
-              <Check className="w-4 h-4 text-green-400" />
+              <Check className="h-4 w-4 text-violet-500" />
               {toast.message}
             </motion.div>
           ))}
         </AnimatePresence>
       </div>
-
     </div>
+  );
+}
+
+function SectionLabel({ index, title }: { index: string; title: string }) {
+  return (
+    <div>
+      <p className="text-xs font-medium uppercase tracking-[0.2em] text-violet-500">{index}</p>
+      <h2 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">{title}</h2>
+    </div>
+  );
+}
+
+function IconButton({
+  children,
+  label,
+  onClick,
+}: {
+  children: React.ReactNode;
+  label: string;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className="grid h-8 w-8 place-items-center rounded-full text-violet-700 hover:bg-violet-100 dark:text-violet-200 dark:hover:bg-white/10"
+    >
+      {children}
+    </button>
   );
 }
